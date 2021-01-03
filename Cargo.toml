@@ -1,0 +1,10 @@
+[package]
+name = "metabars"
+version = "0.1.0"
+authors = ["Andrey Kuznetsov <fear@loathing.in>"]
+edition = "2018"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+chrono = "0.4"
+rust_decimal = "1.9"

@@ -1,19 +1,19 @@
 use chrono::prelude::*;
 use rust_decimal::prelude::*;
 
-#[derive(Debug)]
-struct State {
-    next_bar: NaiveDateTime,
-    last_value: Decimal,
+#[derive(Debug, PartialEq)]
+pub enum Bar {
+    // closing value
+    Single(Decimal),
+    // closing value and count of empty bars
+    WithEmpty(Decimal, usize),
 }
 
-impl State {
-    fn new(next_bar: NaiveDateTime, last_value: Decimal) -> Self {
-        Self {
-            next_bar,
-            last_value,
-        }
-    }
+pub trait Sampler {
+    /// Returns Some(price) if period has been passed, None otherwise
+    fn next(&mut self, dt: NaiveDateTime, value: Decimal) -> Option<Bar>;
+
+    fn next_bar(dt: NaiveDateTime) -> chrono::NaiveDateTime;
 }
 
 macro_rules! sampler {
@@ -31,12 +31,19 @@ macro_rules! sampler {
     };
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Bar {
-    // closing value
-    Single(Decimal),
-    // closing value and count of empty bars
-    WithEmpty(Decimal, usize),
+#[derive(Debug)]
+struct State {
+    next_bar: NaiveDateTime,
+    last_value: Decimal,
+}
+
+impl State {
+    fn new(next_bar: NaiveDateTime, last_value: Decimal) -> Self {
+        Self {
+            next_bar,
+            last_value,
+        }
+    }
 }
 
 macro_rules! next {
@@ -119,13 +126,6 @@ macro_rules! Hour {
             }
         }
     };
-}
-
-pub trait Sampler {
-    /// Returns Some(price) if period has been passed, None otherwise
-    fn next(&mut self, dt: NaiveDateTime, value: Decimal) -> Option<Bar>;
-
-    fn next_bar(dt: NaiveDateTime) -> chrono::NaiveDateTime;
 }
 
 Minute!(M1, 1);

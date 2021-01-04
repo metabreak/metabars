@@ -1,17 +1,16 @@
 use chrono::prelude::*;
-use rust_decimal::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Bar {
     // closing value
-    Single(Decimal),
+    Single(f64),
     // closing value and count of empty bars
-    WithEmpty(Decimal, usize),
+    WithEmpty(f64, usize),
 }
 
 pub trait Sampler {
     /// Returns Some(price) if period has been passed, None otherwise
-    fn next(&mut self, dt: NaiveDateTime, value: Decimal) -> Option<Bar>;
+    fn next(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bar>;
 
     fn next_bar(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime;
 }
@@ -34,11 +33,11 @@ macro_rules! sampler {
 #[derive(Debug)]
 struct State {
     next_bar: NaiveDateTime,
-    last_value: Decimal,
+    last_value: f64,
 }
 
 impl State {
-    fn new(next_bar: NaiveDateTime, last_value: Decimal) -> Self {
+    fn new(next_bar: NaiveDateTime, last_value: f64) -> Self {
         Self {
             next_bar,
             last_value,
@@ -48,7 +47,7 @@ impl State {
 
 macro_rules! next {
     () => {
-        fn next(&mut self, dt: NaiveDateTime, value: Decimal) -> Option<Bar> {
+        fn next(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bar> {
             match self.state {
                 Some(State {
                     next_bar,
@@ -224,98 +223,98 @@ mod test {
     #[test]
     fn test_m15() {
         let mut sampler = M15::default();
-        let res = sampler.next(date("2015-01-01 10:03:00"), Decimal::zero());
+        let res = sampler.next(date("2015-01-01 10:03:00"), 0.);
         assert_eq!(res, None);
-        let res = sampler.next(date("2015-01-01 10:04:00"), Decimal::new(4, 0));
+        let res = sampler.next(date("2015-01-01 10:04:00"), 4.);
         assert_eq!(res, None);
 
         // new period start, should return prev period closing value
-        let res = sampler.next(date("2015-01-01 10:15:00"), Decimal::new(15, 0));
-        assert_eq!(res, Some(Bar::Single(Decimal::new(4, 0))));
+        let res = sampler.next(date("2015-01-01 10:15:00"), 15.);
+        assert_eq!(res, Some(Bar::Single(4.)));
 
         // 15-30 period hasn't passed, should return last period close value
-        let res = sampler.next(date("2015-01-01 10:15:01"), Decimal::new(15, 0));
+        let res = sampler.next(date("2015-01-01 10:15:01"), 15.);
         assert_eq!(res, None);
-        let res = sampler.next(date("2015-01-01 10:15:02"), Decimal::new(16, 0));
+        let res = sampler.next(date("2015-01-01 10:15:02"), 16.);
         assert_eq!(res, None);
 
         // new period
-        let res = sampler.next(date("2015-01-01 10:45:02"), Decimal::new(45, 0));
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(16, 0), 1)));
+        let res = sampler.next(date("2015-01-01 10:45:02"), 45.);
+        assert_eq!(res, Some(Bar::WithEmpty(16., 1)));
     }
 
     #[test]
     fn test_h12() {
         let mut sampler = H12::default();
-        let res = sampler.next(date("2015-01-01 01:03:00"), Decimal::zero());
+        let res = sampler.next(date("2015-01-01 01:03:00"), 0.);
         assert_eq!(res, None);
-        let res = sampler.next(date("2015-01-01 01:04:00"), Decimal::new(4, 0));
+        let res = sampler.next(date("2015-01-01 01:04:00"), 4.);
         assert_eq!(res, None);
 
         // new period start, should return prev period closing value
-        let res = sampler.next(date("2015-01-01 12:00:00"), Decimal::new(15, 0));
-        assert_eq!(res, Some(Bar::Single(Decimal::new(4, 0))));
+        let res = sampler.next(date("2015-01-01 12:00:00"), 15.);
+        assert_eq!(res, Some(Bar::Single(4.)));
 
         // 12-24 period hasn't passed, should return last period close value
-        let res = sampler.next(date("2015-01-01 13:00:00"), Decimal::new(15, 0));
+        let res = sampler.next(date("2015-01-01 13:00:00"), 15.);
         assert_eq!(res, None);
 
         // new period
-        let res = sampler.next(date("2015-01-03 10:45:02"), Decimal::new(45, 0));
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(15, 0), 2)));
+        let res = sampler.next(date("2015-01-03 10:45:02"), 45.);
+        assert_eq!(res, Some(Bar::WithEmpty(15., 2)));
     }
 
     #[test]
     fn test_d1() {
         let mut sampler = D1::default();
-        let res = sampler.next(date("2015-01-03 10:45:02"), Decimal::zero());
+        let res = sampler.next(date("2015-01-03 10:45:02"), 0.);
         assert_eq!(res, None);
 
-        let res = sampler.next(date("2015-01-04 00:00:00"), Decimal::new(1, 0));
-        assert_eq!(res, Some(Bar::Single(Decimal::zero())));
+        let res = sampler.next(date("2015-01-04 00:00:00"), 1.);
+        assert_eq!(res, Some(Bar::Single(0.)));
 
-        let res = sampler.next(date("2015-01-07 00:00:00"), Decimal::new(2, 0));
+        let res = sampler.next(date("2015-01-07 00:00:00"), 2.);
         // 05 and 06 are empty
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(1, 0), 2)))
+        assert_eq!(res, Some(Bar::WithEmpty(1., 2)))
     }
 
     #[test]
     fn test_w1() {
         let mut sampler = W1::default();
         // monday
-        let res = sampler.next(date("2020-01-04 10:45:02"), Decimal::zero());
+        let res = sampler.next(date("2020-01-04 10:45:02"), 0.);
         assert_eq!(res, None);
 
         // tuesday
-        let res = sampler.next(date("2020-01-05 00:00:00"), Decimal::new(1, 0));
+        let res = sampler.next(date("2020-01-05 00:00:00"), 1.);
         assert_eq!(res, None);
 
         // The next monday
-        let res = sampler.next(date("2020-01-11 00:00:00"), Decimal::new(2, 0));
-        assert_eq!(res, Some(Bar::Single(Decimal::new(1, 0))));
+        let res = sampler.next(date("2020-01-11 00:00:00"), 2.);
+        assert_eq!(res, Some(Bar::Single(1.)));
 
         // Two weeks later, tuesday
-        let res = sampler.next(date("2020-01-26 00:00:00"), Decimal::new(3, 0));
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(2, 0), 1)));
+        let res = sampler.next(date("2020-01-26 00:00:00"), 3.);
+        assert_eq!(res, Some(Bar::WithEmpty(2., 1)));
     }
 
     #[test]
     fn test_mn1() {
         let mut sampler = MN1::default();
-        let res = sampler.next(date("2020-01-01 10:45:02"), Decimal::zero());
+        let res = sampler.next(date("2020-01-01 10:45:02"), 0.);
         assert_eq!(res, None);
 
-        let res = sampler.next(date("2020-01-02 00:00:00"), Decimal::new(1, 0));
+        let res = sampler.next(date("2020-01-02 00:00:00"), 1.);
         assert_eq!(res, None);
 
-        let res = sampler.next(date("2020-02-02 00:00:00"), Decimal::new(2, 0));
-        assert_eq!(res, Some(Bar::Single(Decimal::new(1, 0))));
+        let res = sampler.next(date("2020-02-02 00:00:00"), 2.);
+        assert_eq!(res, Some(Bar::Single(1.)));
 
-        let res = sampler.next(date("2020-10-26 00:00:00"), Decimal::new(3, 0));
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(2, 0), 7)));
+        let res = sampler.next(date("2020-10-26 00:00:00"), 3.);
+        assert_eq!(res, Some(Bar::WithEmpty(2., 7)));
 
-        let res = sampler.next(date("2021-01-01 00:00:01"), Decimal::new(3, 0));
-        assert_eq!(res, Some(Bar::WithEmpty(Decimal::new(3, 0), 2)));
+        let res = sampler.next(date("2021-01-01 00:00:01"), 3.);
+        assert_eq!(res, Some(Bar::WithEmpty(3., 2)));
     }
 
     fn date(date_str: &str) -> NaiveDateTime {

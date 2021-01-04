@@ -13,7 +13,7 @@ pub trait Sampler {
     /// Returns Some(price) if period has been passed, None otherwise
     fn next(&mut self, dt: NaiveDateTime, value: Decimal) -> Option<Bar>;
 
-    fn next_bar(dt: NaiveDateTime) -> chrono::NaiveDateTime;
+    fn next_bar(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime;
 }
 
 macro_rules! sampler {
@@ -58,10 +58,10 @@ macro_rules! next {
                         let mut empty_count = 0;
                         // woohoo!
                         // TODO: TwoHardThings
-                        let mut next_bar = Self::next_bar(next_bar);
+                        let mut next_bar = self.next_bar(next_bar);
                         while dt >= next_bar {
                             empty_count += 1;
-                            next_bar = Self::next_bar(next_bar);
+                            next_bar = self.next_bar(next_bar);
                         }
 
                         self.state = Some(State::new(next_bar, value));
@@ -79,7 +79,7 @@ macro_rules! next {
                     }
                 }
                 None => {
-                    let next_bar = Self::next_bar(dt);
+                    let next_bar = self.next_bar(dt);
                     self.state = Some(State::new(next_bar, value));
                     None
                 }
@@ -96,7 +96,7 @@ macro_rules! Minute {
             next!();
 
             #[allow(clippy::modulo_one)]
-            fn next_bar(dt: NaiveDateTime) -> NaiveDateTime {
+            fn next_bar(&self, dt: NaiveDateTime) -> NaiveDateTime {
                 dt.date()
                     .and_hms(dt.hour(), 0, 0)
                     .checked_add_signed(chrono::Duration::minutes(
@@ -116,7 +116,7 @@ macro_rules! Hour {
             next!();
 
             #[allow(clippy::modulo_one)]
-            fn next_bar(dt: NaiveDateTime) -> NaiveDateTime {
+            fn next_bar(&self, dt: NaiveDateTime) -> NaiveDateTime {
                 dt.date()
                     .and_hms(0, 0, 0)
                     .checked_add_signed(chrono::Duration::hours(
@@ -152,7 +152,7 @@ sampler!(D1);
 impl Sampler for D1 {
     next!();
 
-    fn next_bar(dt: NaiveDateTime) -> NaiveDateTime {
+    fn next_bar(&self, dt: NaiveDateTime) -> NaiveDateTime {
         dt.date()
             .and_hms(0, 0, 0)
             .checked_add_signed(chrono::Duration::days(1))
@@ -164,7 +164,7 @@ sampler!(W1);
 impl Sampler for W1 {
     next!();
 
-    fn next_bar(dt: NaiveDateTime) -> chrono::NaiveDateTime {
+    fn next_bar(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime {
         let weekday = dt.weekday();
         dt.date()
             .checked_add_signed(chrono::Duration::days(
@@ -179,7 +179,7 @@ sampler!(MN1);
 impl Sampler for MN1 {
     next!();
 
-    fn next_bar(dt: NaiveDateTime) -> chrono::NaiveDateTime {
+    fn next_bar(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime {
         let date = dt.date();
         let date = if date.month() == 12 {
             // FIXME: bug with B.C.?
@@ -188,6 +188,32 @@ impl Sampler for MN1 {
             NaiveDate::from_ymd(date.year(), date.month() + 1, 1)
         };
         date.and_hms(0, 0, 0)
+    }
+}
+
+impl dyn Sampler {
+    pub fn from_short(short: &str) -> Option<Box<dyn Sampler>> {
+        match short {
+            "M1" => Some(Box::new(M1::default())),
+            "M2" => Some(Box::new(M2::default())),
+            "M3" => Some(Box::new(M3::default())),
+            "M4" => Some(Box::new(M4::default())),
+            "M5" => Some(Box::new(M5::default())),
+            "M6" => Some(Box::new(M6::default())),
+            "M10" => Some(Box::new(M10::default())),
+            "M12" => Some(Box::new(M12::default())),
+            "M15" => Some(Box::new(M15::default())),
+            "M20" => Some(Box::new(M20::default())),
+            "M30" => Some(Box::new(M30::default())),
+            "H1" => Some(Box::new(H1::default())),
+            "H2" => Some(Box::new(H2::default())),
+            "H3" => Some(Box::new(H3::default())),
+            "H4" => Some(Box::new(H4::default())),
+            "H6" => Some(Box::new(H6::default())),
+            "H8" => Some(Box::new(H8::default())),
+            "H12" => Some(Box::new(H12::default())),
+            _ => None,
+        }
     }
 }
 

@@ -3,6 +3,7 @@ use chrono::prelude::*;
 #[derive(Debug, PartialEq)]
 pub struct Bar {
     close: f64,
+    high: f64,
     stop_dt: NaiveDateTime,
 }
 
@@ -39,13 +40,15 @@ macro_rules! sampler {
 #[derive(Debug)]
 struct State {
     next_bar_dt: NaiveDateTime,
+    max_value: f64,
     last_value: f64,
 }
 
 impl State {
-    fn new(next_bar_dt: NaiveDateTime, last_value: f64) -> Self {
+    fn new(next_bar_dt: NaiveDateTime, max_value: f64, last_value: f64) -> Self {
         Self {
             next_bar_dt,
+            max_value,
             last_value,
         }
     }
@@ -57,13 +60,17 @@ macro_rules! next {
             match self.state {
                 Some(State {
                     next_bar_dt,
+                    max_value,
                     last_value,
                 }) => {
                     if dt >= next_bar_dt {
                         let full_bar = Bar {
                             close: last_value,
+                            high: max_value,
                             stop_dt: next_bar_dt,
                         };
+
+                        let max_value = f64::max(value, max_value);
 
                         // TODO: TwoHardThings
                         // woohoo!
@@ -73,12 +80,13 @@ macro_rules! next {
                         while dt >= next_bar_dt {
                             empty_bars.push(Bar {
                                 close: last_value,
+                                high: last_value,
                                 stop_dt: next_bar_dt,
                             });
                             next_bar_dt = self.next_bar_dt(next_bar_dt);
                         }
 
-                        self.state = Some(State::new(next_bar_dt, value));
+                        self.state = Some(State::new(next_bar_dt, max_value, value));
 
                         if empty_bars.len() > 0 {
                             Some(Bars::WithEmpty(full_bar, empty_bars))
@@ -86,13 +94,14 @@ macro_rules! next {
                             Some(Bars::Single(full_bar))
                         }
                     } else {
-                        self.state = Some(State::new(next_bar_dt, value));
+                        let max_value = f64::max(value, max_value);
+                        self.state = Some(State::new(next_bar_dt, max_value, value));
                         None
                     }
                 }
                 None => {
                     let next_bar_dt = self.next_bar_dt(dt);
-                    self.state = Some(State::new(next_bar_dt, value));
+                    self.state = Some(State::new(next_bar_dt, value, value));
                     None
                 }
             }
@@ -248,14 +257,15 @@ mod test {
             res,
             Some(Bars::Single(Bar {
                 close: 4.,
+                high: 4.,
                 stop_dt: date("2015-01-01 10:15:00")
             }))
         );
 
         // 15-30 period hasn't passed, should return last period close value
-        let res = sampler.next_bar(date("2015-01-01 10:15:01"), 15.);
+        let res = sampler.next_bar(date("2015-01-01 10:15:01"), 16.);
         assert_eq!(res, None);
-        let res = sampler.next_bar(date("2015-01-01 10:15:02"), 16.);
+        let res = sampler.next_bar(date("2015-01-01 10:15:02"), 15.);
         assert_eq!(res, None);
 
         // new period
@@ -264,11 +274,13 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 16.,
+                    close: 15.,
+                    high: 16.,
                     stop_dt: date("2015-01-01 10:30:00")
                 },
                 vec![Bar {
-                    close: 16.,
+                    close: 15.,
+                    high: 15.,
                     stop_dt: date("2015-01-01 10:45:00")
                 }]
             ))
@@ -289,6 +301,7 @@ mod test {
             res,
             Some(Bars::Single(Bar {
                 close: 4.,
+                high: 4.,
                 stop_dt: date("2015-01-01 12:00:00")
             }))
         );
@@ -304,15 +317,18 @@ mod test {
             Some(Bars::WithEmpty(
                 Bar {
                     close: 15.,
+                    high: 15.,
                     stop_dt: date("2015-01-02 00:00:00")
                 },
                 vec![
                     Bar {
                         close: 15.,
+                        high: 15.,
                         stop_dt: date("2015-01-02 12:00:00")
                     },
                     Bar {
                         close: 15.,
+                        high: 15.,
                         stop_dt: date("2015-01-03 00:00:00")
                     },
                 ]
@@ -331,6 +347,7 @@ mod test {
             res,
             Some(Bars::Single(Bar {
                 close: 0.,
+                high: 0.,
                 stop_dt: date("2015-01-04 00:00:00")
             }))
         );
@@ -342,15 +359,18 @@ mod test {
             Some(Bars::WithEmpty(
                 Bar {
                     close: 1.,
+                    high: 1.,
                     stop_dt: date("2015-01-05 00:00:00")
                 },
                 vec![
                     Bar {
                         close: 1.,
+                        high: 1.,
                         stop_dt: date("2015-01-06 00:00:00")
                     },
                     Bar {
                         close: 1.,
+                        high: 1.,
                         stop_dt: date("2015-01-07 00:00:00")
                     },
                 ]
@@ -375,6 +395,7 @@ mod test {
             res,
             Some(Bars::Single(Bar {
                 close: 1.,
+                high: 1.,
                 stop_dt: date("2021-01-11 00:00:00")
             }))
         );
@@ -386,10 +407,12 @@ mod test {
             Some(Bars::WithEmpty(
                 Bar {
                     close: 2.,
+                    high: 2.,
                     stop_dt: date("2021-01-18 00:00:00")
                 },
                 vec![Bar {
                     close: 2.,
+                    high: 2.,
                     stop_dt: date("2021-01-25 00:00:00")
                 }]
             ))
@@ -410,6 +433,7 @@ mod test {
             res,
             Some(Bars::Single(Bar {
                 close: 1.,
+                high: 1.,
                 stop_dt: date("2020-02-01 00:00:00")
             }))
         );
@@ -420,35 +444,43 @@ mod test {
             Some(Bars::WithEmpty(
                 Bar {
                     close: 2.,
+                    high: 2.,
                     stop_dt: date("2020-03-01 00:00:00")
                 },
                 vec![
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-04-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-05-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-06-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-07-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-08-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-09-01 00:00:00")
                     },
                     Bar {
                         close: 2.,
+                        high: 2.,
                         stop_dt: date("2020-10-01 00:00:00")
                     },
                 ]
@@ -461,15 +493,18 @@ mod test {
             Some(Bars::WithEmpty(
                 Bar {
                     close: 3.,
+                    high: 3.,
                     stop_dt: date("2020-11-01 00:00:00")
                 },
                 vec![
                     Bar {
                         close: 3.,
+                        high: 3.,
                         stop_dt: date("2020-12-01 00:00:00")
                     },
                     Bar {
                         close: 3.,
+                        high: 3.,
                         stop_dt: date("2021-01-01 00:00:00")
                     },
                 ]

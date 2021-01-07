@@ -2,9 +2,9 @@ use chrono::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub struct Bar {
-    close: f64,
-    high: f64,
-    stop_dt: NaiveDateTime,
+    pub close: f64,
+    pub high: f64,
+    pub stop_dt: NaiveDateTime,
 }
 
 #[derive(Debug, PartialEq)]
@@ -15,7 +15,7 @@ pub enum Bars {
     WithEmpty(Bar, Vec<Bar>),
 }
 
-pub trait Sampler {
+pub trait Sampler: Send {
     /// Returns Some(price) if period has been passed, None otherwise
     fn next_bar(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bars>;
 

@@ -6,7 +6,8 @@ pub struct Bar {
     pub high: f64,
     pub low: f64,
     pub close: f64,
-    pub stop_dt: NaiveDateTime,
+    pub bar_start: NaiveDateTime,
+    pub next_bar_dt: NaiveDateTime,
 }
 
 #[derive(Debug, PartialEq)]
@@ -19,9 +20,13 @@ pub enum Bars {
 
 pub trait Sampler: Send {
     /// Returns Some(price) if period has been passed, None otherwise
+    fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime;
+
     fn next_bar(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bars>;
 
     fn next_bar_dt(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime;
+
+    fn current_incomplete(&self) -> Option<Bar>;
 }
 
 macro_rules! sampler {
@@ -41,6 +46,7 @@ macro_rules! sampler {
 
 #[derive(Debug)]
 struct State {
+    bar_start: NaiveDateTime,
     next_bar_dt: NaiveDateTime,
     open: f64,
     high: f64,
@@ -49,8 +55,16 @@ struct State {
 }
 
 impl State {
-    fn new(next_bar_dt: NaiveDateTime, open: f64, high: f64, low: f64, close: f64) -> Self {
+    fn new(
+        bar_start: NaiveDateTime,
+        next_bar_dt: NaiveDateTime,
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+    ) -> Self {
         Self {
+            bar_start,
             next_bar_dt,
             open,
             high,
@@ -62,9 +76,31 @@ impl State {
 
 macro_rules! next {
     () => {
+        fn current_incomplete(&self) -> Option<Bar> {
+            match self.state {
+                Some(State {
+                    open,
+                    high,
+                    low,
+                    close,
+                    bar_start,
+                    next_bar_dt,
+                }) => Some(Bar {
+                    open,
+                    high,
+                    low,
+                    close,
+                    bar_start,
+                    next_bar_dt,
+                }),
+                None => None,
+            }
+        }
+
         fn next_bar(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bars> {
             match self.state {
                 Some(State {
+                    bar_start,
                     next_bar_dt,
                     open,
                     high,
@@ -77,26 +113,35 @@ macro_rules! next {
                             high,
                             low,
                             close,
-                            stop_dt: next_bar_dt,
+                            bar_start,
+                            next_bar_dt,
                         };
 
-                        // TODO: TwoHardThings
-                        // woohoo!
-                        let mut next_bar_dt = self.next_bar_dt(next_bar_dt);
+                        let mut empty_bar_start = next_bar_dt;
+                        let mut empty_bar_end = self.next_bar_dt(next_bar_dt);
 
                         let mut empty_bars = vec![];
-                        while dt >= next_bar_dt {
+                        while dt >= empty_bar_end {
                             empty_bars.push(Bar {
                                 open: close,
                                 high: close,
                                 low: close,
                                 close: close,
-                                stop_dt: next_bar_dt,
+                                bar_start: empty_bar_start,
+                                next_bar_dt: empty_bar_end,
                             });
-                            next_bar_dt = self.next_bar_dt(next_bar_dt);
+                            empty_bar_start = empty_bar_end;
+                            empty_bar_end = self.next_bar_dt(empty_bar_end);
                         }
 
-                        self.state = Some(State::new(next_bar_dt, value, value, value, value));
+                        self.state = Some(State::new(
+                            empty_bar_start,
+                            empty_bar_end,
+                            value,
+                            value,
+                            value,
+                            value,
+                        ));
 
                         if empty_bars.len() > 0 {
                             Some(Bars::WithEmpty(full_bar, empty_bars))
@@ -108,13 +153,21 @@ macro_rules! next {
                         let low = f64::min(value, low);
                         let close = value;
 
-                        self.state = Some(State::new(next_bar_dt, open, high, low, close));
+                        self.state =
+                            Some(State::new(bar_start, next_bar_dt, open, high, low, close));
                         None
                     }
                 }
                 None => {
                     let next_bar_dt = self.next_bar_dt(dt);
-                    self.state = Some(State::new(next_bar_dt, value, value, value, value));
+                    self.state = Some(State::new(
+                        self.bar_start(dt),
+                        next_bar_dt,
+                        value,
+                        value,
+                        value,
+                        value,
+                    ));
                     None
                 }
             }
@@ -138,6 +191,14 @@ macro_rules! Minute {
                     ))
                     .unwrap()
             }
+
+            fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime {
+                NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()).and_hms(
+                    dt.hour(),
+                    (dt.minute() / $period) * $period,
+                    0,
+                )
+            }
         }
     };
 }
@@ -157,6 +218,14 @@ macro_rules! Hour {
                         (dt.hour() + ($period - dt.hour() % $period)) as i64,
                     ))
                     .unwrap()
+            }
+
+            fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime {
+                NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()).and_hms(
+                    (dt.hour() / $period) * $period,
+                    0,
+                    0,
+                )
             }
         }
     };
@@ -192,6 +261,10 @@ impl Sampler for D1 {
             .checked_add_signed(chrono::Duration::days(1))
             .unwrap()
     }
+
+    fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime {
+        NaiveDate::from_ymd(dt.year(), dt.month(), dt.day()).and_hms(0, 0, 0)
+    }
 }
 
 sampler!(W1);
@@ -202,11 +275,19 @@ impl Sampler for W1 {
         let weekday = dt.weekday();
         let sub = weekday.num_days_from_monday() as i64;
         let add = 7 - sub;
-        // println!("weekday is {}, sub is {}, add is {}", weekday, sub, add);
         dt.date()
             .checked_add_signed(chrono::Duration::days(add))
             .unwrap()
             .and_hms(0, 0, 0)
+    }
+
+    fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime {
+        NaiveDate::from_ymd(dt.year(), dt.month(), dt.day())
+            .and_hms(0, 0, 0)
+            .checked_sub_signed(chrono::Duration::days(
+                dt.weekday().number_from_monday() as i64 - 1,
+            ))
+            .unwrap()
     }
 }
 
@@ -223,6 +304,11 @@ impl Sampler for MN1 {
             NaiveDate::from_ymd(date.year(), date.month() + 1, 1)
         };
         date.and_hms(0, 0, 0)
+    }
+
+    // FIXME: fails on 0 year but who cares?
+    fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime {
+        NaiveDate::from_ymd(dt.year(), dt.month(), 1).and_hms(0, 0, 0)
     }
 }
 
@@ -261,6 +347,18 @@ mod test {
         let mut sampler = M15::default();
         let res = sampler.next_bar(date("2015-01-01 10:03:00"), 0.);
         assert_eq!(res, None);
+        assert_eq!(
+            sampler.current_incomplete(),
+            Some(Bar {
+                open: 0.,
+                high: 0.,
+                low: 0.,
+                close: 0.,
+                bar_start: date("2015-01-01 10:00:00"),
+                next_bar_dt: date("2015-01-01 10:15:00")
+            })
+        );
+
         let res = sampler.next_bar(date("2015-01-01 10:04:00"), 4.);
         assert_eq!(res, None);
 
@@ -273,7 +371,8 @@ mod test {
                 high: 4.,
                 low: 0.,
                 close: 4.,
-                stop_dt: date("2015-01-01 10:15:00")
+                bar_start: date("2015-01-01 10:00:00"),
+                next_bar_dt: date("2015-01-01 10:15:00")
             }))
         );
 
@@ -293,14 +392,16 @@ mod test {
                     high: 16.,
                     low: 15.,
                     close: 15.,
-                    stop_dt: date("2015-01-01 10:30:00")
+                    bar_start: date("2015-01-01 10:15:00"),
+                    next_bar_dt: date("2015-01-01 10:30:00")
                 },
                 vec![Bar {
                     open: 15.,
                     high: 15.,
                     low: 15.,
                     close: 15.,
-                    stop_dt: date("2015-01-01 10:45:00")
+                    bar_start: date("2015-01-01 10:30:00"),
+                    next_bar_dt: date("2015-01-01 10:45:00")
                 }]
             ))
         );
@@ -323,7 +424,8 @@ mod test {
                 high: 4.,
                 low: 0.,
                 close: 4.,
-                stop_dt: date("2015-01-01 12:00:00")
+                bar_start: date("2015-01-01 00:00:00"),
+                next_bar_dt: date("2015-01-01 12:00:00")
             }))
         );
 
@@ -341,7 +443,8 @@ mod test {
                     high: 15.,
                     low: 15.,
                     close: 15.,
-                    stop_dt: date("2015-01-02 00:00:00")
+                    bar_start: date("2015-01-01 12:00:00"),
+                    next_bar_dt: date("2015-01-02 00:00:00")
                 },
                 vec![
                     Bar {
@@ -349,14 +452,16 @@ mod test {
                         high: 15.,
                         low: 15.,
                         close: 15.,
-                        stop_dt: date("2015-01-02 12:00:00")
+                        bar_start: date("2015-01-02 00:00:00"),
+                        next_bar_dt: date("2015-01-02 12:00:00")
                     },
                     Bar {
                         open: 15.,
                         high: 15.,
                         low: 15.,
                         close: 15.,
-                        stop_dt: date("2015-01-03 00:00:00")
+                        bar_start: date("2015-01-02 12:00:00"),
+                        next_bar_dt: date("2015-01-03 00:00:00")
                     },
                 ]
             ))
@@ -377,7 +482,8 @@ mod test {
                 high: 0.,
                 low: 0.,
                 close: 0.,
-                stop_dt: date("2015-01-04 00:00:00")
+                bar_start: date("2015-01-03 00:00:00"),
+                next_bar_dt: date("2015-01-04 00:00:00")
             }))
         );
 
@@ -391,7 +497,8 @@ mod test {
                     high: 1.,
                     low: 1.,
                     close: 1.,
-                    stop_dt: date("2015-01-05 00:00:00")
+                    bar_start: date("2015-01-04 00:00:00"),
+                    next_bar_dt: date("2015-01-05 00:00:00")
                 },
                 vec![
                     Bar {
@@ -399,14 +506,16 @@ mod test {
                         high: 1.,
                         low: 1.,
                         close: 1.,
-                        stop_dt: date("2015-01-06 00:00:00")
+                        bar_start: date("2015-01-05 00:00:00"),
+                        next_bar_dt: date("2015-01-06 00:00:00")
                     },
                     Bar {
                         open: 1.,
                         high: 1.,
                         low: 1.,
                         close: 1.,
-                        stop_dt: date("2015-01-07 00:00:00")
+                        bar_start: date("2015-01-06 00:00:00"),
+                        next_bar_dt: date("2015-01-07 00:00:00")
                     },
                 ]
             ))
@@ -433,7 +542,8 @@ mod test {
                 high: 1.,
                 low: 0.,
                 close: 1.,
-                stop_dt: date("2021-01-11 00:00:00")
+                bar_start: date("2021-01-04 00:00:00"),
+                next_bar_dt: date("2021-01-11 00:00:00")
             }))
         );
 
@@ -447,14 +557,16 @@ mod test {
                     high: 2.,
                     low: 2.,
                     close: 2.,
-                    stop_dt: date("2021-01-18 00:00:00")
+                    bar_start: date("2021-01-11 00:00:00"),
+                    next_bar_dt: date("2021-01-18 00:00:00")
                 },
                 vec![Bar {
                     open: 2.,
                     high: 2.,
                     low: 2.,
                     close: 2.,
-                    stop_dt: date("2021-01-25 00:00:00")
+                    bar_start: date("2021-01-18 00:00:00"),
+                    next_bar_dt: date("2021-01-25 00:00:00")
                 }]
             ))
         );
@@ -477,7 +589,8 @@ mod test {
                 high: 1.,
                 low: 0.,
                 close: 1.,
-                stop_dt: date("2020-02-01 00:00:00")
+                bar_start: date("2020-01-01 00:00:00"),
+                next_bar_dt: date("2020-02-01 00:00:00")
             }))
         );
 
@@ -490,7 +603,8 @@ mod test {
                     high: 2.,
                     low: 2.,
                     close: 2.,
-                    stop_dt: date("2020-03-01 00:00:00")
+                    bar_start: date("2020-02-01 00:00:00"),
+                    next_bar_dt: date("2020-03-01 00:00:00")
                 },
                 vec![
                     Bar {
@@ -498,49 +612,56 @@ mod test {
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-04-01 00:00:00")
+                        bar_start: date("2020-03-01 00:00:00"),
+                        next_bar_dt: date("2020-04-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-05-01 00:00:00")
+                        bar_start: date("2020-04-01 00:00:00"),
+                        next_bar_dt: date("2020-05-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-06-01 00:00:00")
+                        bar_start: date("2020-05-01 00:00:00"),
+                        next_bar_dt: date("2020-06-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-07-01 00:00:00")
+                        bar_start: date("2020-06-01 00:00:00"),
+                        next_bar_dt: date("2020-07-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         close: 2.,
                         low: 2.,
-                        stop_dt: date("2020-08-01 00:00:00")
+                        bar_start: date("2020-07-01 00:00:00"),
+                        next_bar_dt: date("2020-08-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-09-01 00:00:00")
+                        bar_start: date("2020-08-01 00:00:00"),
+                        next_bar_dt: date("2020-09-01 00:00:00")
                     },
                     Bar {
                         open: 2.,
                         high: 2.,
                         low: 2.,
                         close: 2.,
-                        stop_dt: date("2020-10-01 00:00:00")
+                        bar_start: date("2020-09-01 00:00:00"),
+                        next_bar_dt: date("2020-10-01 00:00:00")
                     },
                 ]
             ))
@@ -555,7 +676,8 @@ mod test {
                     high: 3.,
                     low: 3.,
                     close: 3.,
-                    stop_dt: date("2020-11-01 00:00:00")
+                    bar_start: date("2020-10-01 00:00:00"),
+                    next_bar_dt: date("2020-11-01 00:00:00")
                 },
                 vec![
                     Bar {
@@ -563,14 +685,16 @@ mod test {
                         high: 3.,
                         low: 3.,
                         close: 3.,
-                        stop_dt: date("2020-12-01 00:00:00")
+                        bar_start: date("2020-11-01 00:00:00"),
+                        next_bar_dt: date("2020-12-01 00:00:00")
                     },
                     Bar {
                         open: 3.,
                         high: 3.,
                         low: 3.,
                         close: 3.,
-                        stop_dt: date("2021-01-01 00:00:00")
+                        bar_start: date("2020-12-01 00:00:00"),
+                        next_bar_dt: date("2021-01-01 00:00:00")
                     },
                 ]
             ))

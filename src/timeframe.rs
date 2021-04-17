@@ -2,8 +2,10 @@ use chrono::prelude::*;
 
 #[derive(Debug, PartialEq)]
 pub struct Bar {
-    pub close: f64,
+    pub open: f64,
     pub high: f64,
+    pub low: f64,
+    pub close: f64,
     pub stop_dt: NaiveDateTime,
 }
 
@@ -40,16 +42,20 @@ macro_rules! sampler {
 #[derive(Debug)]
 struct State {
     next_bar_dt: NaiveDateTime,
-    max_value: f64,
-    last_value: f64,
+    open: f64,
+    high: f64,
+    low: f64,
+    close: f64,
 }
 
 impl State {
-    fn new(next_bar_dt: NaiveDateTime, max_value: f64, last_value: f64) -> Self {
+    fn new(next_bar_dt: NaiveDateTime, open: f64, high: f64, low: f64, close: f64) -> Self {
         Self {
             next_bar_dt,
-            max_value,
-            last_value,
+            open,
+            high,
+            low,
+            close,
         }
     }
 }
@@ -60,17 +66,19 @@ macro_rules! next {
             match self.state {
                 Some(State {
                     next_bar_dt,
-                    max_value,
-                    last_value,
+                    open,
+                    high,
+                    low,
+                    close,
                 }) => {
                     if dt >= next_bar_dt {
                         let full_bar = Bar {
-                            close: last_value,
-                            high: max_value,
+                            open,
+                            high,
+                            low,
+                            close,
                             stop_dt: next_bar_dt,
                         };
-
-                        let max_value = f64::max(value, max_value);
 
                         // TODO: TwoHardThings
                         // woohoo!
@@ -79,14 +87,16 @@ macro_rules! next {
                         let mut empty_bars = vec![];
                         while dt >= next_bar_dt {
                             empty_bars.push(Bar {
-                                close: last_value,
-                                high: last_value,
+                                open: close,
+                                high: close,
+                                low: close,
+                                close: close,
                                 stop_dt: next_bar_dt,
                             });
                             next_bar_dt = self.next_bar_dt(next_bar_dt);
                         }
 
-                        self.state = Some(State::new(next_bar_dt, max_value, value));
+                        self.state = Some(State::new(next_bar_dt, value, value, value, value));
 
                         if empty_bars.len() > 0 {
                             Some(Bars::WithEmpty(full_bar, empty_bars))
@@ -94,14 +104,17 @@ macro_rules! next {
                             Some(Bars::Single(full_bar))
                         }
                     } else {
-                        let max_value = f64::max(value, max_value);
-                        self.state = Some(State::new(next_bar_dt, max_value, value));
+                        let high = f64::max(value, high);
+                        let low = f64::min(value, low);
+                        let close = value;
+
+                        self.state = Some(State::new(next_bar_dt, open, high, low, close));
                         None
                     }
                 }
                 None => {
                     let next_bar_dt = self.next_bar_dt(dt);
-                    self.state = Some(State::new(next_bar_dt, value, value));
+                    self.state = Some(State::new(next_bar_dt, value, value, value, value));
                     None
                 }
             }
@@ -256,8 +269,10 @@ mod test {
         assert_eq!(
             res,
             Some(Bars::Single(Bar {
-                close: 4.,
+                open: 0.,
                 high: 4.,
+                low: 0.,
+                close: 4.,
                 stop_dt: date("2015-01-01 10:15:00")
             }))
         );
@@ -274,13 +289,17 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 15.,
+                    open: 15.,
                     high: 16.,
+                    low: 15.,
+                    close: 15.,
                     stop_dt: date("2015-01-01 10:30:00")
                 },
                 vec![Bar {
-                    close: 15.,
+                    open: 15.,
                     high: 15.,
+                    low: 15.,
+                    close: 15.,
                     stop_dt: date("2015-01-01 10:45:00")
                 }]
             ))
@@ -300,8 +319,10 @@ mod test {
         assert_eq!(
             res,
             Some(Bars::Single(Bar {
-                close: 4.,
+                open: 0.,
                 high: 4.,
+                low: 0.,
+                close: 4.,
                 stop_dt: date("2015-01-01 12:00:00")
             }))
         );
@@ -316,19 +337,25 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 15.,
+                    open: 15.,
                     high: 15.,
+                    low: 15.,
+                    close: 15.,
                     stop_dt: date("2015-01-02 00:00:00")
                 },
                 vec![
                     Bar {
-                        close: 15.,
+                        open: 15.,
                         high: 15.,
+                        low: 15.,
+                        close: 15.,
                         stop_dt: date("2015-01-02 12:00:00")
                     },
                     Bar {
-                        close: 15.,
+                        open: 15.,
                         high: 15.,
+                        low: 15.,
+                        close: 15.,
                         stop_dt: date("2015-01-03 00:00:00")
                     },
                 ]
@@ -346,8 +373,10 @@ mod test {
         assert_eq!(
             res,
             Some(Bars::Single(Bar {
-                close: 0.,
+                open: 0.,
                 high: 0.,
+                low: 0.,
+                close: 0.,
                 stop_dt: date("2015-01-04 00:00:00")
             }))
         );
@@ -358,19 +387,25 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 1.,
+                    open: 1.,
                     high: 1.,
+                    low: 1.,
+                    close: 1.,
                     stop_dt: date("2015-01-05 00:00:00")
                 },
                 vec![
                     Bar {
-                        close: 1.,
+                        open: 1.,
                         high: 1.,
+                        low: 1.,
+                        close: 1.,
                         stop_dt: date("2015-01-06 00:00:00")
                     },
                     Bar {
-                        close: 1.,
+                        open: 1.,
                         high: 1.,
+                        low: 1.,
+                        close: 1.,
                         stop_dt: date("2015-01-07 00:00:00")
                     },
                 ]
@@ -394,8 +429,10 @@ mod test {
         assert_eq!(
             res,
             Some(Bars::Single(Bar {
-                close: 1.,
+                open: 0.,
                 high: 1.,
+                low: 0.,
+                close: 1.,
                 stop_dt: date("2021-01-11 00:00:00")
             }))
         );
@@ -406,13 +443,17 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 2.,
+                    open: 2.,
                     high: 2.,
+                    low: 2.,
+                    close: 2.,
                     stop_dt: date("2021-01-18 00:00:00")
                 },
                 vec![Bar {
-                    close: 2.,
+                    open: 2.,
                     high: 2.,
+                    low: 2.,
+                    close: 2.,
                     stop_dt: date("2021-01-25 00:00:00")
                 }]
             ))
@@ -432,8 +473,10 @@ mod test {
         assert_eq!(
             res,
             Some(Bars::Single(Bar {
-                close: 1.,
+                open: 0.,
                 high: 1.,
+                low: 0.,
+                close: 1.,
                 stop_dt: date("2020-02-01 00:00:00")
             }))
         );
@@ -443,44 +486,60 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 2.,
+                    open: 2.,
                     high: 2.,
+                    low: 2.,
+                    close: 2.,
                     stop_dt: date("2020-03-01 00:00:00")
                 },
                 vec![
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-04-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-05-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-06-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-07-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        close: 2.,
+                        low: 2.,
                         stop_dt: date("2020-08-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-09-01 00:00:00")
                     },
                     Bar {
-                        close: 2.,
+                        open: 2.,
                         high: 2.,
+                        low: 2.,
+                        close: 2.,
                         stop_dt: date("2020-10-01 00:00:00")
                     },
                 ]
@@ -492,19 +551,25 @@ mod test {
             res,
             Some(Bars::WithEmpty(
                 Bar {
-                    close: 3.,
+                    open: 3.,
                     high: 3.,
+                    low: 3.,
+                    close: 3.,
                     stop_dt: date("2020-11-01 00:00:00")
                 },
                 vec![
                     Bar {
-                        close: 3.,
+                        open: 3.,
                         high: 3.,
+                        low: 3.,
+                        close: 3.,
                         stop_dt: date("2020-12-01 00:00:00")
                     },
                     Bar {
-                        close: 3.,
+                        open: 3.,
                         high: 3.,
+                        low: 3.,
+                        close: 3.,
                         stop_dt: date("2021-01-01 00:00:00")
                     },
                 ]

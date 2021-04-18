@@ -126,7 +126,7 @@ macro_rules! next {
                                 open: close,
                                 high: close,
                                 low: close,
-                                close: close,
+                                close,
                                 bar_start: empty_bar_start,
                                 next_bar_dt: empty_bar_end,
                             });
@@ -291,8 +291,8 @@ impl Sampler for W1 {
     }
 }
 
-sampler!(MN1);
-impl Sampler for MN1 {
+sampler!(Mn1);
+impl Sampler for Mn1 {
     next!();
 
     fn next_bar_dt(&self, dt: NaiveDateTime) -> chrono::NaiveDateTime {
@@ -574,7 +574,7 @@ mod test {
 
     #[test]
     fn test_mn1() {
-        let mut sampler = MN1::default();
+        let mut sampler = Mn1::default();
         let res = sampler.next_bar(date("2020-01-01 10:45:02"), 0.);
         assert_eq!(res, None);
 

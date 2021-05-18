@@ -10,6 +10,19 @@ pub struct Bar {
     pub next_bar_dt: NaiveDateTime,
 }
 
+impl From<State> for Bar {
+    fn from(state: State) -> Self {
+        Self {
+            open: state.open,
+            high: state.high,
+            low: state.low,
+            close: state.close,
+            bar_start: state.bar_start,
+            next_bar_dt: state.next_bar_dt,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Bars {
     // closing value
@@ -44,7 +57,7 @@ macro_rules! sampler {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct State {
     bar_start: NaiveDateTime,
     next_bar_dt: NaiveDateTime,
@@ -77,24 +90,7 @@ impl State {
 macro_rules! next {
     () => {
         fn current_incomplete(&self) -> Option<Bar> {
-            match self.state {
-                Some(State {
-                    open,
-                    high,
-                    low,
-                    close,
-                    bar_start,
-                    next_bar_dt,
-                }) => Some(Bar {
-                    open,
-                    high,
-                    low,
-                    close,
-                    bar_start,
-                    next_bar_dt,
-                }),
-                None => None,
-            }
+            self.state.to_owned().map(Bar::from)
         }
 
         fn next_bar(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bars> {

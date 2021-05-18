@@ -10,8 +10,8 @@ pub struct Bar {
     pub next_bar_dt: NaiveDateTime,
 }
 
-impl From<State> for Bar {
-    fn from(state: State) -> Self {
+impl From<&State> for Bar {
+    fn from(state: &State) -> Self {
         Self {
             open: state.open,
             high: state.high,
@@ -90,7 +90,7 @@ impl State {
 macro_rules! next {
     () => {
         fn current_incomplete(&self) -> Option<Bar> {
-            self.state.to_owned().map(Bar::from)
+            self.state.as_ref().map(Bar::from)
         }
 
         fn next_bar(&mut self, dt: NaiveDateTime, value: f64) -> Option<Bars> {

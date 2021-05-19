@@ -23,6 +23,17 @@ impl From<&State> for Bar {
     }
 }
 
+impl Bar {
+    pub fn available_timeframes() -> Vec<&'static str> {
+        let minutes = vec![
+            "M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12", "M15", "M20", "M30",
+        ];
+        let hours = vec!["H1", "H2", "H3", "H4", "H6", "H8", "H12"];
+
+        [minutes, hours].concat()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Bars {
     // closing value
@@ -30,7 +41,6 @@ pub enum Bars {
     // closing value and count of empty bars
     WithEmpty(Bar, Vec<Bar>),
 }
-
 pub trait Sampler: Send {
     /// Returns Some(price) if period has been passed, None otherwise
     fn bar_start(&self, dt: NaiveDateTime) -> NaiveDateTime;
@@ -695,6 +705,52 @@ mod test {
                 ]
             ))
         );
+    }
+
+    #[test]
+    fn bar_timeframes() {
+        let timeframes = Bar::available_timeframes();
+
+        assert!(timeframes.contains(&"M1"));
+        assert!(timeframes.contains(&"H1"));
+        assert!(!timeframes.is_empty())
+    }
+
+    #[test]
+    fn generate_sampler_from_str() {
+        let mut sampler = <dyn Sampler>::from_short("M5").unwrap();
+        let res = sampler.next_bar(date("2015-01-01 10:00:00"), -1.);
+        assert_eq!(res, None);
+        assert_eq!(
+            sampler.current_incomplete(),
+            Some(Bar {
+                open: -1.,
+                high: -1.,
+                low: -1.,
+                close: -1.,
+                bar_start: date("2015-01-01 10:00:00"),
+                next_bar_dt: date("2015-01-01 10:05:00")
+            })
+        );
+
+        let res = sampler.next_bar(date("2015-01-01 10:02:01"), 4.);
+        assert_eq!(res, None);
+
+        let res = sampler.next_bar(date("2015-01-01 10:05:00"), 15.);
+        assert_eq!(
+            res,
+            Some(Bars::Single(Bar {
+                open: -1.,
+                high: 4.,
+                low: -1.,
+                close: 4.,
+                bar_start: date("2015-01-01 10:00:00"),
+                next_bar_dt: date("2015-01-01 10:05:00")
+            }))
+        );
+
+        let res = sampler.next_bar(date("2015-01-01 10:05:01"), 16.);
+        assert_eq!(res, None);
     }
 
     fn date(date_str: &str) -> NaiveDateTime {
